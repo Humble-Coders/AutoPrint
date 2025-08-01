@@ -1,21 +1,44 @@
 package org.example.autoprint.repositories
 
-
-
 import com.google.cloud.firestore.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import org.example.autoprint.models.PrintOrder
 import org.example.autoprint.models.PrintSettings
-import java.sql.DriverManager.println
 import java.time.format.DateTimeFormatter
-import java.util.Collections.emptyList
-import java.util.Collections.emptyMap
 import java.util.logging.Logger
 
 class FirestoreRepository(private val firestore: Firestore) {
     private val logger = Logger.getLogger("PrintShopApp")
+
+    suspend fun updateOrderStatus(orderId: String, status: String) {
+        try {
+            logger.info("🔄 Updating order status for: $orderId to $status")
+            firestore.collection("print_orders")
+                .document(orderId)
+                .update("orderStatus", status)
+                .get() // Wait for completion
+            logger.info("✅ Successfully updated status for order: $orderId")
+        } catch (e: Exception) {
+            logger.severe("❌ Failed to update status for order $orderId: ${e.message}")
+            throw e
+        }
+    }
+
+    suspend fun updateOrderInQueue(orderId: String, inQueue: Boolean) {
+        try {
+            logger.info("🔄 Updating inQueue status for order: $orderId to $inQueue")
+            firestore.collection("print_orders")
+                .document(orderId)
+                .update("inQueue", inQueue)
+                .get() // Wait for completion
+            logger.info("✅ Successfully updated inQueue for order: $orderId")
+        } catch (e: Exception) {
+            logger.severe("❌ Failed to update inQueue for order $orderId: ${e.message}")
+            throw e
+        }
+    }
 
     fun listenToPrintOrders(): Flow<List<PrintOrder>> = callbackFlow {
         logger.info("🔥 Starting to listen to print_orders collection...")
@@ -61,7 +84,7 @@ class FirestoreRepository(private val firestore: Firestore) {
                             orderId = doc.getString("orderId") ?: "",
                             orderStatus = doc.getString("orderStatus") ?: "",
                             pageCount = doc.getLong("pageCount")?.toInt() ?: 0,
-                            paid = doc.getBoolean("paid") ?: false,
+                            paid = doc.getBoolean("isPaid") ?: false, // Changed from "paid" to "isPaid"
                             paymentAmount = doc.getDouble("paymentAmount") ?: 0.0,
                             paymentStatus = doc.getString("paymentStatus") ?: "",
                             createdAt = createdAtString,
@@ -74,15 +97,23 @@ class FirestoreRepository(private val firestore: Firestore) {
                             inQueue = doc.getBoolean("inQueue") ?: false,
                             printSettings = doc.get("printSettings")?.let { settings ->
                                 val settingsMap = settings as? Map<*, *> ?: emptyMap<String, Any>()
+                                println("🔧 Print settings map: $settingsMap") // Debug log
                                 PrintSettings(
                                     colorMode = settingsMap["colorMode"] as? String ?: "COLOR",
-                                    copies = (settingsMap["copies"] as? Long)?.toInt() ?: 1,
+                                    copies = when (val copiesValue = settingsMap["copies"]) {
+                                        is Long -> copiesValue.toInt()
+                                        is Int -> copiesValue
+                                        is String -> copiesValue.toIntOrNull() ?: 1
+                                        else -> 1
+                                    },
                                     customPages = settingsMap["customPages"] as? String ?: "",
                                     orientation = settingsMap["orientation"] as? String ?: "PORTRAIT",
                                     pagesToPrint = settingsMap["pagesToPrint"] as? String ?: "ALL",
                                     paperSize = settingsMap["paperSize"] as? String ?: "A4",
                                     quality = settingsMap["quality"] as? String ?: "HIGH"
-                                )
+                                ).also { parsedSettings ->
+                                    println("✅ Parsed settings - copies: ${parsedSettings.copies}")
+                                }
                             } ?: PrintSettings(),
                             canAutoPrint = doc.getBoolean("canAutoPrint") ?: false,
                             queuePriority = doc.getLong("queuePriority")?.toInt() ?: 0,

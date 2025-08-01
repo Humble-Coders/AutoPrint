@@ -1,8 +1,5 @@
 package org.example.autoprint.utils
 
-// Remove this import:
-// import com.google.firebase.database.utilities.Pair
-
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*

@@ -27,18 +27,26 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
+
+            // Firebase & Google Cloud
             implementation("com.google.firebase:firebase-admin:9.2.0")
+            implementation("com.google.cloud:google-cloud-storage:2.29.1")
+
+            // Coroutines
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.7.3")
-            implementation("com.google.cloud:google-cloud-storage:2.29.1")
-            //implementation("io.coil-kt:coil:3.0.0-alpha06")
+
+            // PDF Processing & Printing
             implementation("org.apache.pdfbox:pdfbox:3.0.1")
+
+            // HTTP Client
             implementation("io.ktor:ktor-client-core:2.3.5")
             implementation("io.ktor:ktor-client-cio:2.3.5")
+
+            // JSON Serialization
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
 
-
-            // extended icons
+            // Extended Material Icons
             implementation(compose.materialIconsExtended)
         }
     }
