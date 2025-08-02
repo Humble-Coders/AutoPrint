@@ -6,6 +6,7 @@ import org.apache.pdfbox.printing.PDFPageable
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.example.autoprint.models.PrintOrder
 import org.example.autoprint.models.PrintSettings
+import org.example.autoprint.models.PrinterSettings
 import java.awt.print.*
 import java.io.File
 import java.util.logging.Logger
@@ -14,8 +15,13 @@ import javax.print.PrintService
 import javax.print.attribute.HashPrintRequestAttributeSet
 import javax.print.attribute.standard.*
 
-class PrintService {
+class PrintService(private var printerSettings: PrinterSettings = PrinterSettings()) {
     private val logger = Logger.getLogger("PrintService")
+
+    fun updatePrinterSettings(settings: PrinterSettings) {
+        printerSettings = settings
+        logger.info("🔧 Updated printer settings: $settings")
+    }
 
     suspend fun printDocument(
         file: File,
@@ -47,6 +53,7 @@ class PrintService {
         onComplete: (Boolean, String?) -> Unit
     ) = withContext(Dispatchers.IO) {
         var document: PDDocument? = null
+        var filteredDocument: PDDocument? = null
         try {
             logger.info("📄 Loading PDF document: ${file.name}")
             onProgress("Loading PDF document...")
@@ -56,8 +63,29 @@ class PrintService {
             logger.info("📄 Document has $totalPages pages")
             logger.info("🔧 Print settings: ${order.printSettings}")
 
+            // Use smart printer selection if configured, fallback to original logic
             onProgress("Setting up printer...")
-            val printService = findPrintService()
+            val printService = if (printerSettings.isConfigured()) {
+                onProgress("Selecting printer based on color mode...")
+                val targetPrinterName = printerSettings.getPrinterForColorMode(order.printSettings.colorMode)
+                logger.info("🎯 Target printer for ${order.printSettings.colorMode} mode: $targetPrinterName")
+
+                val specificPrinter = findSpecificPrintService(targetPrinterName)
+                if (specificPrinter != null) {
+                    logger.info("✅ Using configured printer: ${specificPrinter.name}")
+                    onProgress("Selected printer: ${specificPrinter.name}")
+                    specificPrinter
+                } else {
+                    logger.warning("⚠️ Configured printer not found, falling back to default")
+                    onProgress("Configured printer not found, using default...")
+                    findPrintService()
+                }
+            } else {
+                logger.info("ℹ️ No printer configuration found, using default printer")
+                onProgress("Using default printer...")
+                findPrintService()
+            }
+
             if (printService == null) {
                 logger.warning("❌ No printer found")
                 onComplete(false, "No printer found")
@@ -66,8 +94,8 @@ class PrintService {
 
             logger.info("🖨️ Using printer: ${printService.name}")
 
-            // Validate page range
-            if (order.printSettings.pagesToPrint == "CUSTOM") {
+            // Handle custom page ranges by creating a filtered document
+            val documentToPrint = if (order.printSettings.pagesToPrint == "CUSTOM") {
                 val validPages = parsePageRange(order.printSettings.customPages, totalPages)
                 if (validPages.isEmpty()) {
                     logger.warning("❌ No valid pages to print from range: ${order.printSettings.customPages}")
@@ -75,6 +103,12 @@ class PrintService {
                     return@withContext
                 }
                 logger.info("✅ Valid pages to print: $validPages")
+                onProgress("Preparing custom page range...")
+                filteredDocument = createFilteredDocument(document, validPages)
+                filteredDocument
+            } else {
+                logger.info("📄 Printing all pages")
+                document
             }
 
             onProgress("Configuring print settings...")
@@ -82,18 +116,22 @@ class PrintService {
             val job = printService.createPrintJob()
 
             onProgress("Creating print job...")
-            val pageable = PDFPageable(document)
-            val printable = createPrintable(pageable, order.printSettings)
+            val pageable = PDFPageable(documentToPrint)
+            val printable = createSimplePrintable(pageable)
 
             val doc = SimpleDoc(printable, DocFlavor.SERVICE_FORMATTED.PRINTABLE, null)
 
-            onProgress("Sending to printer...")
-            logger.info("📤 Submitting print job to printer")
+            onProgress("Sending to ${printService.name}...")
+            logger.info("📤 Submitting print job to printer: ${printService.name}")
+
+            // Submit print job - this is the production approach
             job.print(doc, attributes)
 
-            onProgress("Print job submitted successfully")
+            // For production physical printers, the job is queued immediately
+            // The printer handles the actual printing asynchronously
+            onProgress("Print job sent to ${printService.name} successfully")
             logger.info("✅ Print job completed successfully for: ${file.name}")
-            onComplete(true, "Document printed successfully")
+            onComplete(true, "Document printed successfully on ${printService.name}")
 
         } catch (e: Exception) {
             logger.severe("❌ PDF print error for ${file.name}: ${e.message}")
@@ -101,10 +139,59 @@ class PrintService {
             onComplete(false, "PDF print error: ${e.message}")
         } finally {
             document?.close()
+            filteredDocument?.close()
             logger.info("🔒 PDF document closed: ${file.name}")
         }
     }
 
+    private fun createFilteredDocument(originalDoc: PDDocument, pagesToInclude: Set<Int>): PDDocument {
+        val filteredDoc = PDDocument()
+
+        try {
+            logger.info("📄 Creating filtered document with pages: $pagesToInclude")
+
+            // Sort pages to maintain order
+            val sortedPages = pagesToInclude.sorted()
+
+            for (pageNum in sortedPages) {
+                val pageIndex = pageNum - 1 // Convert to 0-based index
+                if (pageIndex < originalDoc.numberOfPages) {
+                    val page = originalDoc.getPage(pageIndex)
+                    filteredDoc.addPage(page)
+                    logger.info("✅ Added page $pageNum (index $pageIndex) to filtered document")
+                } else {
+                    logger.warning("⚠️ Page $pageNum (index $pageIndex) is out of range")
+                }
+            }
+
+            logger.info("📄 Filtered document created with ${filteredDoc.numberOfPages} pages")
+            return filteredDoc
+
+        } catch (e: Exception) {
+            logger.severe("❌ Error creating filtered document: ${e.message}")
+            filteredDoc.close()
+            throw e
+        }
+    }
+
+    private fun createSimplePrintable(pageable: PDFPageable): Printable {
+        return Printable { graphics, pageFormat, pageIndex ->
+            try {
+                if (pageIndex < pageable.numberOfPages) {
+                    logger.info("🖨️ Printing page index: $pageIndex")
+                    pageable.getPrintable(pageIndex).print(graphics, pageFormat, pageIndex)
+                } else {
+                    logger.info("⏭️ Page index $pageIndex is beyond document range")
+                    Printable.NO_SUCH_PAGE
+                }
+            } catch (e: Exception) {
+                logger.severe("❌ Error printing page index $pageIndex: ${e.message}")
+                Printable.PAGE_EXISTS // Continue to next page
+            }
+        }
+    }
+
+    // Original working logic - finds default printer
     private fun findPrintService(): PrintService? {
         val printServices = PrintServiceLookup.lookupPrintServices(
             DocFlavor.SERVICE_FORMATTED.PRINTABLE, null
@@ -128,6 +215,31 @@ class PrintService {
             logger.warning("❌ No printers available")
         }
         return firstService
+    }
+
+    // New logic - finds specific configured printer
+    private fun findSpecificPrintService(printerName: String): PrintService? {
+        if (printerName.isEmpty()) {
+            logger.warning("❌ No printer name specified")
+            return null
+        }
+
+        val printServices = PrintServiceLookup.lookupPrintServices(
+            DocFlavor.SERVICE_FORMATTED.PRINTABLE, null
+        )
+
+        logger.info("🔍 Looking for specific printer: '$printerName'")
+        logger.info("📊 Available print services: ${printServices.map { it.name }}")
+
+        val matchingService = printServices.find { it.name == printerName }
+
+        if (matchingService != null) {
+            logger.info("✅ Found matching printer: ${matchingService.name}")
+        } else {
+            logger.warning("⚠️ Printer '$printerName' not found in available services")
+        }
+
+        return matchingService
     }
 
     private fun createPrintAttributes(settings: PrintSettings): HashPrintRequestAttributeSet {
@@ -193,28 +305,6 @@ class PrintService {
 
         logger.info("✅ Print attributes configured successfully")
         return attributes
-    }
-
-    private fun createPrintable(pageable: PDFPageable, settings: PrintSettings): Printable {
-        return Printable { graphics, pageFormat, pageIndex ->
-            if (shouldPrintPage(pageIndex, settings, pageable.numberOfPages)) {
-                pageable.getPrintable(pageIndex).print(graphics, pageFormat, pageIndex)
-            } else {
-                Printable.NO_SUCH_PAGE
-            }
-        }
-    }
-
-    private fun shouldPrintPage(pageIndex: Int, settings: PrintSettings, totalPages: Int): Boolean {
-        return when (settings.pagesToPrint) {
-            "ALL" -> pageIndex < totalPages
-            "CUSTOM" -> {
-                if (settings.customPages.isBlank()) return pageIndex < totalPages
-                val validPages = parsePageRange(settings.customPages, totalPages)
-                validPages.contains(pageIndex + 1)
-            }
-            else -> pageIndex < totalPages
-        }
     }
 
     private fun parsePageRange(pageRange: String, totalPages: Int): Set<Int> {

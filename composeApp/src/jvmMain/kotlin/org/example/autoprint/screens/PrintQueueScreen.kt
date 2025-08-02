@@ -27,6 +27,20 @@ import java.io.File
 
 @Composable
 fun PrintQueueScreen(viewModel: PrintQueueViewModel) {
+    when (viewModel.currentScreen) {
+        "settings" -> SettingsScreen(
+            printerSettings = viewModel.printerSettings,
+            availablePrinters = viewModel.availablePrinters,
+            onSettingsChange = { viewModel.updatePrinterSettings(it) },
+            onRefreshPrinters = { viewModel.refreshPrinters() },
+            onBack = { viewModel.navigateToQueue() }
+        )
+        else -> QueueScreen(viewModel)
+    }
+}
+
+@Composable
+fun QueueScreen(viewModel: PrintQueueViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -47,6 +61,14 @@ fun PrintQueueScreen(viewModel: PrintQueueViewModel) {
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.navigateToSettings() }
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Settings")
+                }
+
                 if (viewModel.isPrinting) {
                     Button(
                         onClick = { viewModel.stopPrinting() },
@@ -60,7 +82,7 @@ fun PrintQueueScreen(viewModel: PrintQueueViewModel) {
                     Button(
                         onClick = { viewModel.startPrinting() },
                         colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF1976D2)),
-                        enabled = viewModel.printOrders.isNotEmpty()
+                        enabled = viewModel.printOrders.isNotEmpty() && viewModel.printerSettings.isConfigured()
                     ) {
                         Icon(Icons.Default.Print, contentDescription = null, tint = Color.White)
                         Spacer(Modifier.width(4.dp))
@@ -80,11 +102,10 @@ fun PrintQueueScreen(viewModel: PrintQueueViewModel) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Printer Info
-        PrinterInfoCard(
-            defaultPrinter = viewModel.defaultPrinter,
-            availablePrinters = viewModel.availablePrinters,
-            onRefresh = { viewModel.refreshPrinters() }
+        // Printer Configuration Status
+        PrinterConfigurationCard(
+            printerSettings = viewModel.printerSettings,
+            onConfigureClick = { viewModel.navigateToSettings() }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -168,7 +189,8 @@ fun PrintQueueScreen(viewModel: PrintQueueViewModel) {
                             position = index + 1,
                             downloadStatus = viewModel.downloadStates[order.orderId] ?: DownloadStatus.Idle,
                             downloadedFile = viewModel.downloadedFiles[order.orderId],
-                            printStatus = viewModel.printStatuses[order.orderId]
+                            printStatus = viewModel.printStatuses[order.orderId],
+                            printerSettings = viewModel.printerSettings
                         )
                     }
                 }
@@ -198,359 +220,453 @@ fun PrintQueueScreen(viewModel: PrintQueueViewModel) {
         }
     }
 }
-        @Composable
-        fun PrintedOrderCard(order: PrintOrder) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                elevation = 2.dp,
-                backgroundColor = Color(0xFFF1F8E9)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = order.documentName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF2E7D32),
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f)
-                        )
 
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Color(0xFF4CAF50),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = "Order: ${order.orderId.take(8)}...",
-                        fontSize = 10.sp,
-                        color = Color(0xFF666666)
-                    )
-
-                    Text(
-                        text = "${order.printSettings.copies} copies • ${order.printSettings.paperSize}",
-                        fontSize = 10.sp,
-                        color = Color(0xFF666666)
-                    )
-
-                    Text(
-                        text = order.getFormattedDateTime(),
-                        fontSize = 9.sp,
-                        color = Color(0xFF999999)
-                    )
-                }
-            }
-        }
-
-        @Composable
-        fun PrinterInfoCard(
-            defaultPrinter: String?,
-            availablePrinters: List<String>,
-            onRefresh: () -> Unit
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                elevation = 4.dp
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🖨️ Printer Status",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        IconButton(onClick = onRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("Default Printer:", fontSize = 12.sp, color = Color.Gray)
-                            Text(
-                                text = defaultPrinter ?: "None found",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (defaultPrinter != null) Color(0xFF4CAF50) else Color(0xFFF44336)
-                            )
-                        }
-
-                        Column {
-                            Text("Available Printers:", fontSize = 12.sp, color = Color.Gray)
-                            Text(
-                                text = "${availablePrinters.size} found",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        @Composable
-        fun PrintOrderCard(
-            order: PrintOrder,
-            position: Int,
-            downloadStatus: DownloadStatus,
-            downloadedFile: File?,
-            printStatus: PrintJobStatus?
-        ) {
+@Composable
+fun PrinterConfigurationCard(
+    printerSettings: org.example.autoprint.models.PrinterSettings,
+    onConfigureClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp,
+        backgroundColor = if (printerSettings.isConfigured()) Color(0xFFE8F5E8) else Color(0xFFFFF3E0)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White)
-                    .shadow(elevation = 4.dp, shape = RoundedCornerShape(12.dp))
-            ) {
-                // Queue Position
-                Box(
-                    modifier = Modifier
-                        .width(48.dp)
-                        .fillMaxHeight()
-                        .background(
-                            color = when (printStatus?.status) {
-                                PrintStatus.COMPLETED -> Color(0xFF4CAF50)
-                                PrintStatus.PRINTING -> Color(0xFFFF9800)
-                                PrintStatus.FAILED -> Color(0xFFF44336)
-                                PrintStatus.CANCELLED -> Color(0xFF9E9E9E)
-                                else -> Color(0xFF1976D2)
-                            },
-                            shape = RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "#$position",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-
-                // Order Details
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // Header
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = order.documentName,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF263238),
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        StatusChip(status = order.orderStatus, paid = order.paid)
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Order Info
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            DetailItem("Order ID", order.orderId.take(8) + "...")
-                            DetailItem("Pages", "${order.pageCount}")
-                            DetailItem("Customer", order.customerId)
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            DetailItem("Created", order.getFormattedDateTime())
-                            DetailItem("Amount", "₹${order.paymentAmount}")
-                            DetailItem("Phone", order.customerPhone)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    PrintSettingsRow(order.printSettings)
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    DownloadStatusRow(downloadStatus, downloadedFile)
-
-                    // Print Status
-                    printStatus?.let { status ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        PrintStatusRow(status)
-                    }
-                }
-            }
-        }
-
-        @Composable
-        fun PrintStatusRow(status: PrintJobStatus) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = when (status.status) {
-                            PrintStatus.COMPLETED -> Color(0xFFE8F5E8)
-                            PrintStatus.PRINTING -> Color(0xFFFFF3E0)
-                            PrintStatus.FAILED -> Color(0xFFFFEBEE)
-                            PrintStatus.CANCELLED -> Color(0xFFF5F5F5)
-                            else -> Color(0xFFE3F2FD)
-                        },
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val (icon, color) = when (status.status) {
-                    PrintStatus.WAITING -> Icons.Default.HourglassEmpty to Color(0xFF1976D2)
-                    PrintStatus.PRINTING -> Icons.Default.Print to Color(0xFFFF9800)
-                    PrintStatus.COMPLETED -> Icons.Default.CheckCircle to Color(0xFF4CAF50)
-                    PrintStatus.FAILED -> Icons.Default.Error to Color(0xFFF44336)
-                    PrintStatus.CANCELLED -> Icons.Default.Cancel to Color(0xFF9E9E9E)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (printerSettings.isConfigured()) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (printerSettings.isConfigured()) Color(0xFF4CAF50) else Color(0xFFFF9800),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "🖨️ Printer Configuration",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (printerSettings.isConfigured()) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
                 }
 
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-
-                Column {
-                    Text(
-                        text = status.status.name,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = color
+                OutlinedButton(
+                    onClick = onConfigureClick,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        backgroundColor = if (printerSettings.isConfigured()) Color.Transparent else Color(0xFFFF9800),
+                        contentColor = if (printerSettings.isConfigured()) Color(0xFF4CAF50) else Color.White
                     )
-                    if (status.progress.isNotEmpty()) {
-                        Text(
-                            text = status.progress,
-                            fontSize = 11.sp,
-                            color = Color.Gray
-                        )
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (printerSettings.isConfigured()) "Modify" else "Configure")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (printerSettings.isConfigured()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    if (printerSettings.colorPrinter.isNotEmpty()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🌈 Color", fontSize = 12.sp, color = Color.Gray)
+                            Text(
+                                printerSettings.colorPrinter,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1976D2)
+                            )
+                        }
                     }
-                    Text(
-                        text = status.message,
-                        fontSize = 11.sp,
-                        color = Color.Gray
-                    )
+                    if (printerSettings.blackWhitePrinter.isNotEmpty()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("⚫ B&W", fontSize = 12.sp, color = Color.Gray)
+                            Text(
+                                printerSettings.blackWhitePrinter,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1976D2)
+                            )
+                        }
+                    }
+                    if (printerSettings.bothPrinter.isNotEmpty()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🔄 Fallback", fontSize = 12.sp, color = Color.Gray)
+                            Text(
+                                printerSettings.bothPrinter,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1976D2)
+                            )
+                        }
+                    }
                 }
+            } else {
+                Text(
+                    text = "⚠️ Printer configuration required to start printing. Configure separate printers for color and black & white printing.",
+                    fontSize = 14.sp,
+                    color = Color(0xFFE65100)
+                )
             }
         }
+    }
+}
 
-        @Composable
-        fun StatusChip(status: String, paid: Boolean) {
-            val (color, label) = when {
-                paid -> Color(0xFF4CAF50) to "PAID"
-                status == "SUBMITTED" -> Color(0xFF1976D2) to "SUBMITTED"
-                else -> Color(0xFFBDBDBD) to status
-            }
+@Composable
+fun PrintOrderCard(
+    order: PrintOrder,
+    position: Int,
+    downloadStatus: DownloadStatus,
+    downloadedFile: File?,
+    printStatus: PrintJobStatus?,
+    printerSettings: org.example.autoprint.models.PrinterSettings
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White)
+            .shadow(elevation = 4.dp, shape = RoundedCornerShape(12.dp))
+    ) {
+        // Queue Position
+        Box(
+            modifier = Modifier
+                .width(48.dp)
+                .fillMaxHeight()
+                .background(
+                    color = when (printStatus?.status) {
+                        PrintStatus.COMPLETED -> Color(0xFF4CAF50)
+                        PrintStatus.PRINTING -> Color(0xFFFF9800)
+                        PrintStatus.FAILED -> Color(0xFFF44336)
+                        PrintStatus.CANCELLED -> Color(0xFF9E9E9E)
+                        else -> Color(0xFF1976D2)
+                    },
+                    shape = RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "#$position",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
 
-            Surface(
-                color = color,
-                shape = RoundedCornerShape(12.dp),
-                elevation = 2.dp
+        // Order Details
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = label,
+                    text = order.documentName,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF263238),
+                    modifier = Modifier.weight(1f)
+                )
+
+                StatusChip(status = order.orderStatus, paid = order.paid)
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Order Info
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    DetailItem("Order ID", order.orderId.take(8) + "...")
+                    DetailItem("Pages", "${order.pageCount}")
+                    DetailItem("Customer", order.customerId)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    DetailItem("Created", order.getFormattedDateTime())
+                    DetailItem("Amount", "₹${order.paymentAmount}")
+                    DetailItem("Phone", order.customerPhone)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            PrintSettingsRow(order.printSettings)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Printer Assignment Display
+            PrinterAssignmentRow(order.printSettings, printerSettings)
+
+            Spacer(modifier = Modifier.height(12.dp))
+            DownloadStatusRow(downloadStatus, downloadedFile)
+
+            // Print Status
+            printStatus?.let { status ->
+                Spacer(modifier = Modifier.height(8.dp))
+                PrintStatusRow(status)
+            }
+        }
+    }
+}
+
+@Composable
+fun PrinterAssignmentRow(
+    printSettings: org.example.autoprint.models.PrintSettings,
+    printerSettings: org.example.autoprint.models.PrinterSettings
+) {
+    val assignedPrinter = printerSettings.getPrinterForColorMode(printSettings.colorMode)
+    val colorModeIcon = when (printSettings.colorMode.uppercase()) {
+        "COLOR" -> "🌈"
+        else -> "⚫"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = if (assignedPrinter.isNotEmpty()) Color(0xFFE8F5E8) else Color(0xFFFFEBEE),
+                shape = RoundedCornerShape(8.dp)
+            )
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (assignedPrinter.isNotEmpty()) Icons.Default.CheckCircle else Icons.Default.Warning,
+            contentDescription = null,
+            tint = if (assignedPrinter.isNotEmpty()) Color(0xFF4CAF50) else Color(0xFFF44336),
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+
+        if (assignedPrinter.isNotEmpty()) {
+            Text(
+                text = "$colorModeIcon Assigned to: $assignedPrinter",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF2E7D32)
+            )
+        } else {
+            Text(
+                text = "$colorModeIcon No printer configured for ${printSettings.colorMode} mode",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFFC62828)
+            )
+        }
+    }
+}
+@Composable
+fun PrintedOrderCard(order: PrintOrder) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = 2.dp,
+        backgroundColor = Color(0xFFF1F8E9)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = order.documentName,
                     fontSize = 12.sp,
-                    color = Color.White,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    color = Color(0xFF2E7D32),
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
                 )
-            }
-        }
 
-        @Composable
-        fun DetailItem(label: String, value: String) {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(text = label, fontSize = 11.sp, color = Color.Gray)
-                Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFF37474F))
-            }
-        }
-
-        @Composable
-        fun PrintSettingsRow(settings: org.example.autoprint.models.PrintSettings) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFF1F3F4), shape = RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceAround
-            ) {
-                SettingChip(settings.paperSize, Icons.Default.Description)
-                SettingChip("${settings.copies}x", Icons.Default.ContentCopy)
-                SettingChip(settings.colorMode, Icons.Default.Palette)
-                SettingChip(settings.quality, Icons.Default.HighQuality)
-            }
-        }
-
-        @Composable
-        fun SettingChip(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(4.dp)
-            ) {
                 Icon(
-                    imageVector = icon,
+                    Icons.Default.CheckCircle,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = Color(0xFF666666)
+                    tint = Color(0xFF4CAF50),
+                    modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Order: ${order.orderId.take(8)}...",
+                fontSize = 10.sp,
+                color = Color(0xFF666666)
+            )
+
+            Text(
+                text = "${order.printSettings.copies} copies • ${order.printSettings.paperSize}",
+                fontSize = 10.sp,
+                color = Color(0xFF666666)
+            )
+
+            Text(
+                text = order.getFormattedDateTime(),
+                fontSize = 9.sp,
+                color = Color(0xFF999999)
+            )
+        }
+    }
+}
+
+@Composable
+fun PrintStatusRow(status: PrintJobStatus) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = when (status.status) {
+                    PrintStatus.COMPLETED -> Color(0xFFE8F5E8)
+                    PrintStatus.PRINTING -> Color(0xFFFFF3E0)
+                    PrintStatus.FAILED -> Color(0xFFFFEBEE)
+                    PrintStatus.CANCELLED -> Color(0xFFF5F5F5)
+                    else -> Color(0xFFE3F2FD)
+                },
+                shape = RoundedCornerShape(8.dp)
+            )
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val (icon, color) = when (status.status) {
+            PrintStatus.WAITING -> Icons.Default.HourglassEmpty to Color(0xFF1976D2)
+            PrintStatus.PRINTING -> Icons.Default.Print to Color(0xFFFF9800)
+            PrintStatus.COMPLETED -> Icons.Default.CheckCircle to Color(0xFF4CAF50)
+            PrintStatus.FAILED -> Icons.Default.Error to Color(0xFFF44336)
+            PrintStatus.CANCELLED -> Icons.Default.Cancel to Color(0xFF9E9E9E)
+        }
+
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+
+        Column {
+            Text(
+                text = status.status.name,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = color
+            )
+            if (status.progress.isNotEmpty()) {
                 Text(
-                    text = text,
-                    fontSize = 12.sp,
-                    color = Color(0xFF666666)
+                    text = status.progress,
+                    fontSize = 11.sp,
+                    color = Color.Gray
                 )
             }
+            Text(
+                text = status.message,
+                fontSize = 11.sp,
+                color = Color.Gray
+            )
         }
+    }
+}
 
-        @Composable
-        fun DownloadStatusRow(status: DownloadStatus, file: File?) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                when (status) {
-                    is DownloadStatus.Idle -> {
-                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.Gray)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Waiting to download...", fontSize = 12.sp, color = Color.Gray)
-                    }
+@Composable
+fun StatusChip(status: String, paid: Boolean) {
+    val (color, label) = when {
+        paid -> Color(0xFF4CAF50) to "PAID"
+        status == "SUBMITTED" -> Color(0xFF1976D2) to "SUBMITTED"
+        else -> Color(0xFFBDBDBD) to status
+    }
 
-                    is DownloadStatus.Downloading -> {
-                        CircularProgressIndicator(
-                            progress = status.progress,
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = Color(0xFF1976D2)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Downloading ${(status.progress * 100).toInt()}%", fontSize = 12.sp)
-                    }
+    Surface(
+        color = color,
+        shape = RoundedCornerShape(12.dp),
+        elevation = 2.dp
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+    }
+}
 
-                    is DownloadStatus.Completed -> {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Downloaded: ${file?.name}", fontSize = 12.sp, color = Color(0xFF4CAF50))
-                    }
+@Composable
+fun DetailItem(label: String, value: String) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(text = label, fontSize = 11.sp, color = Color.Gray)
+        Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFF37474F))
+    }
+}
 
-                    is DownloadStatus.Error -> {
-                        Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFF44336))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Error: ${status.message}", fontSize = 12.sp, color = Color(0xFFF44336))
-                    }
-                }
+@Composable
+fun PrintSettingsRow(settings: org.example.autoprint.models.PrintSettings) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF1F3F4), shape = RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.SpaceAround
+    ) {
+        SettingChip(settings.paperSize, Icons.Default.Description)
+        SettingChip("${settings.copies}x", Icons.Default.ContentCopy)
+        SettingChip(settings.colorMode, Icons.Default.Palette)
+        SettingChip(settings.quality, Icons.Default.HighQuality)
+    }
+}
+
+@Composable
+fun SettingChip(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = Color(0xFF666666)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            color = Color(0xFF666666)
+        )
+    }
+}
+
+@Composable
+fun DownloadStatusRow(status: DownloadStatus, file: File?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        when (status) {
+            is DownloadStatus.Idle -> {
+                Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.Gray)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Waiting to download...", fontSize = 12.sp, color = Color.Gray)
+            }
+
+            is DownloadStatus.Downloading -> {
+                CircularProgressIndicator(
+                    progress = status.progress,
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFF1976D2)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Downloading ${(status.progress * 100).toInt()}%", fontSize = 12.sp)
+            }
+
+            is DownloadStatus.Completed -> {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Downloaded: ${file?.name}", fontSize = 12.sp, color = Color(0xFF4CAF50))
+            }
+
+            is DownloadStatus.Error -> {
+                Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFF44336))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Error: ${status.message}", fontSize = 12.sp, color = Color(0xFFF44336))
             }
         }
+    }
+}

@@ -5,12 +5,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.example.autoprint.managers.SettingsManager
 import org.example.autoprint.repositories.FirestoreRepository
 import org.example.autoprint.utils.DocumentDownloader
 import org.example.autoprint.services.PrintService
 import org.example.autoprint.services.PrintQueueManager
 import org.example.autoprint.services.PrintJobStatus
 import org.example.autoprint.models.PrintOrder
+import org.example.autoprint.models.PrinterSettings
 import org.example.autoprint.models.DownloadStatus
 import java.io.File
 
@@ -19,7 +21,12 @@ class PrintQueueViewModel(
     private val downloader: DocumentDownloader
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val printService = PrintService()
+    private val settingsManager = SettingsManager()
+
+    var printerSettings by mutableStateOf(PrinterSettings())
+        private set
+
+    private val printService = PrintService(printerSettings)
     private val printQueueManager = PrintQueueManager(printService) { orderId ->
         // Callback when order is printed - update Firebase status
         repository.updateOrderStatus(orderId, "PRINTED")
@@ -46,12 +53,35 @@ class PrintQueueViewModel(
     var defaultPrinter by mutableStateOf<String?>(null)
         private set
 
+    var currentScreen by mutableStateOf("queue")
+        private set
+
     val isPrinting: Boolean get() = printQueueManager.isRunning
 
     init {
+        loadPrinterSettings()
         observePrintOrders()
         observePrintStatuses()
         loadPrinterInfo()
+    }
+
+    private fun loadPrinterSettings() {
+        printerSettings = settingsManager.loadPrinterSettings()
+        printService.updatePrinterSettings(printerSettings)
+    }
+
+    fun updatePrinterSettings(settings: PrinterSettings) {
+        printerSettings = settings
+        printService.updatePrinterSettings(settings)
+        settingsManager.savePrinterSettings(settings)
+    }
+
+    fun navigateToSettings() {
+        currentScreen = "settings"
+    }
+
+    fun navigateToQueue() {
+        currentScreen = "queue"
     }
 
     private fun observePrintOrders() {
@@ -67,12 +97,12 @@ class PrintQueueViewModel(
                 printedOrders = printed
                 printOrders = nonPrinted
 
-                // Auto-add paid orders to queue
-                nonPrinted.filter { it.paid && !it.inQueue }.forEach { order ->
+                // Auto-add paid orders to queue by changing status to QUEUED
+                nonPrinted.filter { it.paid && it.orderStatus == "SUBMITTED" }.forEach { order ->
                     println("🎯 Adding paid order to queue: ${order.orderId}")
                     scope.launch {
                         try {
-                            repository.updateOrderInQueue(order.orderId, true)
+                            repository.updateOrderStatus(order.orderId, "QUEUED")
                         } catch (e: Exception) {
                             println("❌ Failed to add order to queue: ${e.message}")
                         }
@@ -80,7 +110,7 @@ class PrintQueueViewModel(
                 }
 
                 // Auto-download documents for orders in queue
-                nonPrinted.filter { it.paid && it.inQueue }.forEach { order ->
+                nonPrinted.filter { it.paid && it.orderStatus == "QUEUED" }.forEach { order ->
                     if (order.documentUrl.isNotEmpty() &&
                         !downloadedFiles.containsKey(order.orderId) &&
                         downloadStates[order.orderId] !is DownloadStatus.Downloading) {
@@ -120,8 +150,13 @@ class PrintQueueViewModel(
     }
 
     fun startPrinting() {
+        if (!printerSettings.isConfigured()) {
+            println("❌ Printer settings not configured. Please configure printers first.")
+            return
+        }
+
         val readyOrders = printOrders.filter { order ->
-            order.paid && order.inQueue &&
+            order.paid && order.orderStatus == "QUEUED" &&
                     downloadedFiles.containsKey(order.orderId) &&
                     downloadStates[order.orderId] is DownloadStatus.Completed
         }
